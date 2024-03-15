@@ -1,0 +1,6 @@
+snowflake.connector
+pandas
+numpy
+scipy.optimize
+matplotlib.pyplot
+plotly.express
