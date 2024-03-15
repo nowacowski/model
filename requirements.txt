@@ -1,6 +1,6 @@
-snowflake.connector
+snowflake
 pandas
 numpy
-scipy.optimize
+scipy
 matplotlib.pyplot
-plotly.express
+plotly
