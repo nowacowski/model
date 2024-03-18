@@ -113,7 +113,7 @@ def fitting2(df, df_months_no):
     merged_df = pd.merge(df_months_no, df, on='MONTH_DATE')
     merged_df_2 = merged_df[merged_df['INCLUDE']==True]
     df_avg = merged_df_2.iloc[:, 5:].mean(axis=0).dropna()
-    params, covariance = curve_fit(exponential_decay, df_avg.index, df_avg)
+    params, covariance = curve_fit(exponential_decay, df_avg.index.astype(float), df_avg)
     a_fit, b_fit = params
     return a_fit, b_fit, df_avg
 
