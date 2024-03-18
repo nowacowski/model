@@ -2,5 +2,5 @@ snowflake
 pandas
 numpy
 scipy
-matplotlib.pyplot
+matplotlib
 plotly
