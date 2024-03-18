@@ -68,7 +68,7 @@ def dog_to_mog(group):
     return pd.Series(chunks, index=[i for i in range(len(chunks))])
 
 @st.cache_data
-def df_mog_0(df_d_0):
+def df_mog_0_func(df_d_0):
     df_mog_0 = df_d_0.groupby(['MONTH_DATE', 'SPEND','ACCOUNTS_CREATED']).apply(dog_to_mog)
     df_mog_0 = df_mog_0.reset_index()
 
@@ -92,10 +92,17 @@ def df_mog_pivot(df_mog_0):
 def ratio_with_0(df0):
     df = df0.copy()
     columns = list(df.columns)[3:]
-    for col in columns:
-        df[col] = df0[col] / df0[0]
+    for index, row in df.iterrows():
+        if row.loc[0] == 0:
+            # non_null_indices = row[3:].notnull()
+            # df.iloc[index, 3:][non_null_indices] = 0
+            df.loc[index, columns] = np.nan
+        else:
+            df.loc[index, columns] = row[3:] / row[0]
     return df
 
+
+########################################################################
 
 # fitting
 # exp function
@@ -110,11 +117,18 @@ def make_df_months_no(df, months_no):
     return df_months_no
 
 def fitting2(df, df_months_no):
-    merged_df = pd.merge(df_months_no, df, on='MONTH_DATE')
-    merged_df_2 = merged_df[merged_df['INCLUDE']==True]
-    df_avg = merged_df_2.iloc[:, 5:].mean(axis=0).dropna()
-    params, covariance = curve_fit(exponential_decay, df_avg.index.astype(float), df_avg)
-    a_fit, b_fit = params
+    try:
+        merged_df = pd.merge(df_months_no, df, on='MONTH_DATE')
+        merged_df_2 = merged_df[merged_df['INCLUDE']==True]
+        df_avg = merged_df_2.iloc[:, 5:].mean(axis=0).dropna()
+
+        if not df_avg.empty:
+            params, covariance = curve_fit(exponential_decay, df_avg.index.astype(float), df_avg)
+            a_fit, b_fit = params
+        else:
+             a_fit, b_fit = 0.0, 0.0
+    except TypeError:
+        a_fit, b_fit = 0.0, 0.0
     return a_fit, b_fit, df_avg
 
 # fit plot
@@ -129,25 +143,6 @@ def fit_plot(df_avg, a_fit, b_fit):
     # plt.show()
     st.pyplot(fig)
 
-# # fit plot
-# def fit_plot(df_avg, a_fit, b_fit):
-#     fig = px.scatter(df_avg)
-#     line_trace = px.line(
-#             x=df_avg.index, 
-#             y=exponential_decay(df_avg.index, a_fit, b_fit)
-#             ).data[0]
-#     line_trace.update(line=dict(color='red'))
-#     fig.update_traces(legendgroup='Avg')
-#     line_trace.update(legendgroup='Fit')
-#     fig.add_trace(line_trace)
-#     fig.update_layout(
-#         title = 'Exponential Decay Fit',
-#         yaxis_title = '% Rev M0',
-#         xaxis_title = 'MoG',
-#         height = 800
-#     )
-
-#     st.plotly_chart(fig, use_container_width=True)
 
 
 # new % rev avg+fit
@@ -198,6 +193,7 @@ def plot_data_fitted(df_mog_pct,new_mog_pct_avg_fit):
 
 
 
+########################################################################
 
 # final results
 # multi 3y
@@ -206,48 +202,64 @@ def multi_3y(new_mog_pct_avg_fit):
     return multiplier_y3
 
 # multiplier
-def multiplier(df_d0,months_no, df_mog, multiplier_y3):
-    zz = df_d0.copy()
-    zz['MONTH_DATE'] = pd.to_datetime(zz['MONTH_DATE'])
+def multiplier_func(df_d0, df_months_no, df_mog, multiplier_y3):
+    zz0 = df_d0.copy()
+    zz01 = pd.merge(zz0, df_months_no, on='MONTH_DATE')
+    zz = zz01[zz01['INCLUDE']]
+    zz = zz.drop(columns='INCLUDE')
 
-    max_date = zz['MONTH_DATE'].max()
-    min_date = max_date - pd.DateOffset(months=months_no)
-
-    zz = zz[(zz['MONTH_DATE']>=min_date) & (zz['MONTH_DATE']<=max_date) & (zz['DAY_OF_GAME_UTC'] <= 7)]
+    zz = zz[zz['DAY_OF_GAME_UTC'] <= 7]
     zz_d7 = zz.groupby(by=['MONTH_DATE'], as_index=False).sum('REVENUE_NET')[['MONTH_DATE','REVENUE_NET']]
 
-    zz_m = df_mog.copy()
-    zz_m['MONTH_DATE'] = pd.to_datetime(zz_m['MONTH_DATE'])
-    zz_m = zz_m[(zz_m['MONTH_DATE']>=min_date) & (zz_m['MONTH_DATE']<=max_date)]
+    zz_m00 = df_mog.copy()
+    zz_m01 = pd.merge(zz_m00, df_months_no, on='MONTH_DATE')
+    zz_m = zz_m01[zz_m01['INCLUDE']]
+    zz_m = zz_m.drop(columns='INCLUDE')
     zz_m0 = zz_m[['MONTH_DATE',0]]
 
     merged_df = pd.merge(zz_d7, zz_m0, on='MONTH_DATE')
     merged_df['Result'] = merged_df['REVENUE_NET'] / merged_df[0]
-    multiplier_d7 = merged_df['Result'].mean().item()
+
+    if merged_df.empty or merged_df['Result'].isnull().all():
+        multiplier_d7 = 0.0  # Assign a default value if merged_df is empty
+    else:
+        multiplier_d7 = merged_df['Result'].mean().item()
 
     multiplier = (multiplier_y3 / multiplier_d7).item()
 
     return multiplier_d7, multiplier
 
-# D(n) to D7 growth
-def d7_growth(df_d, months_no):
-    d7_growth_0 = df_d.reset_index()
-    d7_growth_0['MONTH_DATE'] = pd.to_datetime(d7_growth_0['MONTH_DATE'])
 
-    max_date = d7_growth_0['MONTH_DATE'].max()
-    min_date = max_date - pd.DateOffset(months=months_no)
-    d7_growth_0 = d7_growth_0[(d7_growth_0['MONTH_DATE']>=min_date) & (d7_growth_0['MONTH_DATE']<max_date)]
-    cols = ['MONTH_DATE'] + list(d7_growth_0.columns)[3:11]
+# D(n) to D7 growth
+def d7_growth(df_d, df_months_no):
+    d7_growth_00 = df_d.reset_index()
+
+    d7_growth_0 = pd.merge(d7_growth_00, df_months_no, on='MONTH_DATE')
+    d7_growth_0 = d7_growth_0[d7_growth_0['INCLUDE']]
+    d7_growth_0 = d7_growth_0.drop(columns='INCLUDE')
+
+    # cols = ['MONTH_DATE'] + list(d7_growth_0.columns)[3:11]
+    cols = [col for col in d7_growth_0.iloc[:,3:].columns if 0 <= int(col) <= 7]
     d7_growth_0 = d7_growth_0[cols]
     
     d7_growth__cumm = d7_growth_0.copy()
-    d7_growth__cumm.iloc[:, 1:] = d7_growth__cumm.iloc[:, 1:].cumsum(axis=1)
+    # d7_growth__cumm.iloc[:, 1:] = d7_growth__cumm.iloc[:, 1:].cumsum(axis=1)
+    d7_growth__cumm = d7_growth__cumm.cumsum(axis=1)
     
     d7_growth = d7_growth__cumm.copy()
-    for i in range(0, len(d7_growth.columns)-1):
-        d7_growth[i] = d7_growth[7] / d7_growth[i]
+    for index, row in d7_growth.iterrows():
+        for i, col_name in enumerate(d7_growth.columns):
+            if row[7] == 0:
+                d7_growth.at[index, col_name] = np.nan
+            else:
+                if row[col_name] == 0:
+                    d7_growth.at[index, col_name] = np.nan
+                else:
+                    d7_growth.at[index, col_name] = row[7] / row[col_name]
+        # d7_growth[i] = d7_growth[7] / d7_growth[i]
     
-    d7_growth_mean = d7_growth.iloc[:,1:].mean()
+    # d7_growth_mean = d7_growth.iloc[:,1:].mean()
+    d7_growth_mean = d7_growth.mean()
 
     return d7_growth_mean
 
@@ -257,7 +269,103 @@ def roas_goal(ROAS_goal_Y3, multiplier, d7_growth_mean):
     SKAD_ROAS_goal_net = ROAS_goal[1:3].mean()
     return ROAS_goal, SKAD_ROAS_goal_net
 
+########################################################################
+########################################################################
+# Tabs display
+def tab_func(df, plat, us_ww, tab_no, traffic):
 
+    df_d_0 = df_category(df, plat, us_ww, traffic)
+    df_d_pivot = df_category_pivot(df_d_0)
+
+    df_mog_0 = df_mog_0_func(df_d_0)
+    df_mog = df_mog_pivot(df_mog_0)
+
+    df_mog_pct = ratio_with_0(df_mog)
+
+    with st.expander('Net Revenue per DoG'):
+        st.dataframe(df_d_pivot)
+
+    with st.expander('Net Revenue per MoG'):
+        st.dataframe(df_mog)
+
+    with st.expander('% of M0 Net Revenue per MoG'):
+        st.dataframe(df_mog_pct)
+
+
+    with st.expander('Fitting'):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            months_no = st.number_input('No of recent months for fitting', value=9, key='months_no_'+tab_no)
+        
+            st.write('Adjust months to average')
+            df_months_no_0 = make_df_months_no(df_mog_pct, months_no)
+
+            df_months_no = st.data_editor(
+                df_months_no_0,
+                disabled=["MONTH_DATE"],
+                key='df_months_no_'+tab_no
+                )
+
+            a_fit, b_fit, df_avg = fitting2(df_mog_pct, df_months_no)
+
+            st.metric('Amplitude', a_fit)
+            st.metric('Decay', b_fit)
+        with col2:
+            fit_plot(df_avg, a_fit, b_fit)
+            
+        with st.container():
+
+            new_mog_pct_avg_fit = new_avg_fit(a_fit, b_fit, df_avg)
+            df_new_avg_fit_0 = series_to_df_transp(new_mog_pct_avg_fit, '% of M0')
+            
+
+            st.write('Avg + Fitted % of Revenue')
+            st.dataframe(df_new_avg_fit_0)
+
+            value = st.number_input('Adjust parameter intitial value:', min_value=0.0, value=1.0, key='value_'+tab_no)
+            adjust_parameters_df_0 = adjust_params(value)
+            adjust_parameters_df = st.data_editor(adjust_parameters_df_0, key='adjust_parameters_df_'+tab_no)
+
+            df_new_avg_fit = multiply_adjusted(df_new_avg_fit_0, adjust_parameters_df)
+            df_new_avg_fit_b = df_new_avg_fit.copy()
+            df_new_avg_fit_b.columns = df_new_avg_fit.columns.astype(int)
+            df_new_avg_fit_b = df_new_avg_fit_b.T
+
+            st.write('Adjusted Avg + Fitted % of Revenue')
+            st.dataframe(df_new_avg_fit)
+
+            plot_data_fitted(df_mog_pct, df_new_avg_fit_b)
+
+
+    with st.expander('Mulipliers / Goals'):
+
+        col1b, col2b = st.columns(2)
+
+        with col1b:
+            ROAS_goal_Y3 = st.number_input('ROAS Goal Y3', value=1.3, key='roas goal y3 '+tab_no)
+        
+        with col2b:
+            multiplier_y3 = multi_3y(df_new_avg_fit_b)
+            # multiplier_d7, multiplier = multiplier_func(df_d_0, df_months_no, df_mog, multiplier_y3)
+            multiplier_d7, multiplier = multiplier_func(df_d_0, df_months_no, df_mog, multiplier_y3)
+
+            st.metric('Multiplier Y3', multiplier_y3)
+            st.metric('Multiplier D7', multiplier_d7)
+            st.metric('Multiplier', multiplier)
+        
+        d7_growth_mean = d7_growth(df_d_pivot, df_months_no)
+        d7_growth_mean_df = series_to_df_transp(d7_growth_mean, 'D(n) to D7 Growth')
+        st.write('D(n) to D7 Growth')
+        st.dataframe(d7_growth_mean_df)
+
+        ROAS_goal, SKAD_ROAS_goal_net = roas_goal(ROAS_goal_Y3, multiplier, d7_growth_mean)
+        
+        ROAS_goal_df = series_to_df_transp(ROAS_goal, 'ROAS Goal')
+        st.write('ROAS Goal')
+        st.dataframe(ROAS_goal_df)
+
+        st.metric('SKAD ROAS Goal Net', SKAD_ROAS_goal_net)
 
 
 ########################################################################
@@ -265,6 +373,9 @@ def roas_goal(ROAS_goal_Y3, multiplier, d7_growth_mean):
 
 
 ########################################################################
+
+if "form_submitted" not in st.session_state:
+    st.session_state.form_submitted = False
 # sidebar
 with st.sidebar:
     
@@ -284,7 +395,11 @@ with st.sidebar:
 
 ########################################################################
         
-if submit_button:
+        if submit_button:
+            st.session_state.form_submitted = True
+
+if st.session_state.form_submitted:
+
     # parameters for query
     if project == 'SC':
         project_name1 = "where project_name = 'soccerclash-api'"
@@ -301,594 +416,56 @@ if submit_button:
     last_full_month = last_full_month()
     df = df[df['MONTH_DATE']<=last_full_month]
 
-    ########################################################################
-    ########################################################################
+########################################################################
+########################################################################
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["iOS WW", "iOS US", "Android WW Organic", "Android WW Paid", "Android US Organic", "Android US Paid"])
-
 
     with tab1:
         plat_1 = 'ios'
         us_ww_1 = 'ww'
+        tab_no_1 = '1'
+        traffic_1=None
 
-        df_d_0_1 = df_category(df, plat_1, us_ww_1)
-        df_d_pivot_1 = df_category_pivot(df_d_0_1)
-
-        df_mog_0_1 = df_mog_0(df_d_0_1)
-        df_mog_1 = df_mog_pivot(df_mog_0_1)
-
-        df_mog_pct_1 = ratio_with_0(df_mog_1)
-
-        with st.expander('Net Revenue per DoG'):
-            st.dataframe(df_d_pivot_1)
-
-        with st.expander('Net Revenue per MoG'):
-            st.dataframe(df_mog_1)
-
-        with st.expander('% of M0 Net Revenue per MoG'):
-            st.dataframe(df_mog_pct_1)
-
-
-        with st.expander('Fitting'):
-            col1, col2 = st.columns(2)
-
-            with col1:
-                months_no_1 = st.number_input('No of recent months for fitting', value=9, key='months_no_1')
-            
-                st.write('Adjust months to average')
-                df_months_no_0_1 = make_df_months_no(df_mog_pct_1, months_no_1)
-
-                df_months_no_1 = st.data_editor(
-                    df_months_no_0_1,
-                    disabled=["MONTH_DATE"],
-                    key='df_months_no_1'
-                    )
-
-                a_fit_1, b_fit_1, df_avg_1 = fitting2(df_mog_pct_1, df_months_no_1)
-
-                st.metric('Amplitude', a_fit_1)
-                st.metric('Decay', b_fit_1)
-            with col2:
-                fit_plot(df_avg_1, a_fit_1, b_fit_1)
-                
-            with st.container():
-
-                new_mog_pct_avg_fit_1 = new_avg_fit(a_fit_1, b_fit_1, df_avg_1)
-                df_new_avg_fit_0_1 = series_to_df_transp(new_mog_pct_avg_fit_1, '% of M0')
-                
-
-                st.write('Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_0_1)
-
-                value_1 = st.number_input('Adjust parameter intitial value:', min_value=0.0, value=1.0, key='value_1')
-                adjust_parameters_df_0_1 = adjust_params(value_1)
-                adjust_parameters_df_1 = st.data_editor(adjust_parameters_df_0_1, key='adjust_parameters_df_1')
-
-                df_new_avg_fit_1 = multiply_adjusted(df_new_avg_fit_0_1, adjust_parameters_df_1)
-                df_new_avg_fit_1b = df_new_avg_fit_1.copy()
-                df_new_avg_fit_1b.columns = df_new_avg_fit_1.columns.astype(int)
-                df_new_avg_fit_1b = df_new_avg_fit_1b.T
-
-                st.write('Adjusted Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_1)
-
-                plot_data_fitted(df_mog_pct_1, df_new_avg_fit_1b)
-
-
-        with st.expander('Mulipliers / Goals'):
-
-            col1b, col2b = st.columns(2)
-
-            with col1b:
-                ROAS_goal_Y3_1 = st.number_input('ROAS Goal Y3', value=1.3, key='roas goal y3 1')
-            
-            with col2b:
-                multiplier_y3_1 = multi_3y(df_new_avg_fit_1b)
-                multiplier_d7_1, multiplier_1 = multiplier(df_d_0_1, months_no_1, df_mog_1, multiplier_y3_1)
-
-                st.metric('Multiplier Y3', multiplier_y3_1)
-                st.metric('Multiplier D7', multiplier_d7_1)
-                st.metric('Multiplier', multiplier_1)
-            
-            d7_growth_mean_1 = d7_growth(df_d_pivot_1, months_no_1)
-            d7_growth_mean_df_1 = series_to_df_transp(d7_growth_mean_1, 'D(n) to D7 Growth')
-            st.write('D(n) to D7 Growth')
-            st.dataframe(d7_growth_mean_df_1)
-
-            ROAS_goal_1, SKAD_ROAS_goal_net_1 = roas_goal(ROAS_goal_Y3_1, multiplier_1, d7_growth_mean_1)
-            
-            ROAS_goal_df_1 = series_to_df_transp(ROAS_goal_1, 'ROAS Goal')
-            st.write('ROAS Goal')
-            st.dataframe(ROAS_goal_df_1)
-
-            st.metric('SKAD ROAS Goal Net', SKAD_ROAS_goal_net_1)
-
+        tab_func(df, plat_1, us_ww_1, tab_no_1, traffic_1)
 
     with tab2:
         plat_2 = 'ios'
         us_ww_2 = 'us'
+        tab_no_2 = '2'
+        traffic_2=None
 
-        df_d_0_2 = df_category(df, plat_2, us_ww_2)
-        df_d_pivot_2 = df_category_pivot(df_d_0_2)
+        tab_func(df, plat_2, us_ww_2, tab_no_2, traffic_2)
 
-        df_mog_0_2 = df_mog_0(df_d_0_2)
-        df_mog_2 = df_mog_pivot(df_mog_0_2)
-
-        df_mog_pct_2 = ratio_with_0(df_mog_2)
-
-        with st.expander('Net Revenue per DoG'):
-            st.dataframe(df_d_pivot_2)
-
-        with st.expander('Net Revenue per MoG'):
-            st.dataframe(df_mog_2)
-
-        with st.expander('% of M0 Net Revenue per MoG'):
-            st.dataframe(df_mog_pct_2)
-
-
-        with st.expander('Fitting'):
-            col1, col2 = st.columns(2)
-
-            with col1:
-                months_no_2 = st.number_input('No of recent months for fitting', value=9, key='months_no_2')
-
-                st.write('Adjust months to average')
-                df_months_no_0_2 = make_df_months_no(df_mog_pct_2, months_no_2)
-
-                df_months_no_2 = st.data_editor(
-                    df_months_no_0_2,
-                    disabled=["MONTH_DATE"],
-                    key='df_months_no_2'
-                    )
-
-                a_fit_2, b_fit_2, df_avg_2 = fitting2(df_mog_pct_2, df_months_no_2)
-
-                st.metric('Amplitude', a_fit_2)
-                st.metric('Decay', b_fit_2)
-            with col2:
-                fit_plot(df_avg_2, a_fit_2, b_fit_2)
-                
-            with st.container():
-                new_mog_pct_avg_fit_2 = new_avg_fit(a_fit_2, b_fit_2, df_avg_2)
-                df_new_avg_fit_0_2 = series_to_df_transp(new_mog_pct_avg_fit_2, '% of M0')
-
-                st.write('Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_0_2)
-
-                value_2 = st.number_input('Adjust parameter intitial value:', min_value=0.0, value=1.0, key='value_2')
-                adjust_parameters_df_0_2 = adjust_params(value_2)
-                adjust_parameters_df_2 = st.data_editor(adjust_parameters_df_0_2, key='adjust_parameters_df_2')
-
-                df_new_avg_fit_2 = multiply_adjusted(df_new_avg_fit_0_2, adjust_parameters_df_2)
-                df_new_avg_fit_2b = df_new_avg_fit_2.copy()
-                df_new_avg_fit_2b.columns = df_new_avg_fit_2.columns.astype(int)
-                df_new_avg_fit_2b = df_new_avg_fit_2b.T
-
-                st.write('Adjusted Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_2)
-
-                plot_data_fitted(df_mog_pct_2, df_new_avg_fit_2b)
-
-
-        with st.expander('Mulipliers / Goals'):
-
-            
-
-            col1b, col2b = st.columns(2)
-
-            with col1b:
-                ROAS_goal_Y3_2 = st.number_input('ROAS Goal Y3', value=1.3, key='roas goal y3 2')
-            
-            with col2b:
-                multiplier_y3_2 = multi_3y(df_new_avg_fit_2b)
-                multiplier_d7_2, multiplier_2 = multiplier(df_d_0_2, months_no_2, df_mog_2, multiplier_y3_2)
-
-                st.metric('Multiplier Y3', multiplier_y3_2)
-                st.metric('Multiplier D7', multiplier_d7_2)
-                st.metric('Multiplier D7', multiplier_2)
-            
-            d7_growth_mean_2 = d7_growth(df_d_pivot_2, months_no_2)
-            d7_growth_mean_df_2 = series_to_df_transp(d7_growth_mean_2, 'D(n) to D7 Growth')
-            st.write('D(n) to D7 Growth')
-            st.dataframe(d7_growth_mean_df_2)
-
-            ROAS_goal_2, SKAD_ROAS_goal_net_2 = roas_goal(ROAS_goal_Y3_2, multiplier_2, d7_growth_mean_2)
-            
-            ROAS_goal_df_2 = series_to_df_transp(ROAS_goal_2, 'ROAS Goal')
-            st.write('ROAS Goal')
-            st.dataframe(ROAS_goal_df_2)
-
-            st.metric('SKAD ROAS Goal Net', SKAD_ROAS_goal_net_2)
-
-        
     with tab3:
         plat_3 = 'android'
         us_ww_3 = 'ww'
         traffic_3 = 'Organic'
+        tab_no_3 = '3'
 
-        df_d_0_3 = df_category(df, plat_3, us_ww_3, traffic_3)
-        df_d_pivot_3 = df_category_pivot(df_d_0_3)
-
-        df_mog_0_3 = df_mog_0(df_d_0_3)
-        df_mog_3 = df_mog_pivot(df_mog_0_3)
-
-        df_mog_pct_3 = ratio_with_0(df_mog_3)
-
-        with st.expander('Net Revenue per DoG'):
-            st.dataframe(df_d_pivot_3)
-
-        with st.expander('Net Revenue per MoG'):
-            st.dataframe(df_mog_3)
-
-        with st.expander('% of M0 Net Revenue per MoG'):
-            st.dataframe(df_mog_pct_3)
-
-
-        with st.expander('Fitting'):
-            col1, col2 = st.columns(2)
-
-            with col1:
-                months_no_3 = st.number_input('No of recent months for fitting', value=9, key='months_no_3')
-
-                st.write('Adjust months to average')
-                df_months_no_0_3 = make_df_months_no(df_mog_pct_3, months_no_3)
-
-                df_months_no_3 = st.data_editor(
-                    df_months_no_0_3,
-                    disabled=["MONTH_DATE"],
-                    key='df_months_no_3'
-                    )
-
-                a_fit_3, b_fit_3, df_avg_3 = fitting2(df_mog_pct_3, df_months_no_3)
-
-                st.metric('Amplitude', a_fit_3)
-                st.metric('Decay', b_fit_3)
-            with col2:
-                fit_plot(df_avg_3, a_fit_3, b_fit_3)
-                
-            with st.container():
-                new_mog_pct_avg_fit_3 = new_avg_fit(a_fit_3, b_fit_3, df_avg_3)
-                df_new_avg_fit_0_3 = series_to_df_transp(new_mog_pct_avg_fit_3, '% of M0')
-
-                st.write('Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_0_3)
-
-                value_3 = st.number_input('Adjust parameter intitial value:', min_value=0.0, value=1.0, key='value_3')
-                adjust_parameters_df_0_3 = adjust_params(value_3)
-                adjust_parameters_df_3 = st.data_editor(adjust_parameters_df_0_3, key='adjust_parameters_df_3')
-
-                df_new_avg_fit_3 = multiply_adjusted(df_new_avg_fit_0_3, adjust_parameters_df_3)
-                df_new_avg_fit_3b = df_new_avg_fit_3.copy()
-                df_new_avg_fit_3b.columns = df_new_avg_fit_3.columns.astype(int)
-                df_new_avg_fit_3b = df_new_avg_fit_3b.T
-
-                st.write('Adjusted Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_3)
-
-                plot_data_fitted(df_mog_pct_3, df_new_avg_fit_3b)
-
-
-        with st.expander('Mulipliers / Goals'):
-
-            
-
-            col1b, col2b = st.columns(2)
-
-            with col1b:
-                ROAS_goal_Y3_3 = st.number_input('ROAS Goal Y3', value=1.3, key='roas goal y3 3')
-            
-            with col2b:
-                multiplier_y3_3 = multi_3y(df_new_avg_fit_3b)
-                multiplier_d7_3, multiplier_3 = multiplier(df_d_0_3, months_no_3, df_mog_3, multiplier_y3_3)
-
-                st.metric('Multiplier Y3', multiplier_y3_3)
-                st.metric('Multiplier D7', multiplier_d7_3)
-                st.metric('Multiplier D7', multiplier_3)
-            
-            d7_growth_mean_3 = d7_growth(df_d_pivot_3, months_no_3)
-            d7_growth_mean_df_3 = series_to_df_transp(d7_growth_mean_3, 'D(n) to D7 Growth')
-            st.write('D(n) to D7 Growth')
-            st.dataframe(d7_growth_mean_df_3)
-
-            ROAS_goal_3, SKAD_ROAS_goal_net_3 = roas_goal(ROAS_goal_Y3_3, multiplier_3, d7_growth_mean_3)
-            
-            ROAS_goal_df_3 = series_to_df_transp(ROAS_goal_3, 'ROAS Goal')
-            st.write('ROAS Goal')
-            st.dataframe(ROAS_goal_df_3)
-
-            st.metric('SKAD ROAS Goal Net', SKAD_ROAS_goal_net_3)
-
+        tab_func(df, plat_3, us_ww_3, tab_no_3, traffic_3)
 
     with tab4:
         plat_4 = 'android'
         us_ww_4 = 'ww'
+        tab_no_4 = '4'
         traffic_4 = 'Paid'
 
-        df_d_0_4 = df_category(df, plat_4, us_ww_4, traffic_4)
-        df_d_pivot_4 = df_category_pivot(df_d_0_4)
-
-        df_mog_0_4 = df_mog_0(df_d_0_4)
-        df_mog_4 = df_mog_pivot(df_mog_0_4)
-
-        df_mog_pct_4 = ratio_with_0(df_mog_4)
-
-        with st.expander('Net Revenue per DoG'):
-            st.dataframe(df_d_pivot_4)
-
-        with st.expander('Net Revenue per MoG'):
-            st.dataframe(df_mog_4)
-
-        with st.expander('% of M0 Net Revenue per MoG'):
-            st.dataframe(df_mog_pct_4)
-
-
-        with st.expander('Fitting'):
-            col1, col2 = st.columns(2)
-
-            with col1:
-                months_no_4 = st.number_input('No of recent months for fitting', value=9, key='months_no_4')
-
-                st.write('Adjust months to average')
-                df_months_no_0_4 = make_df_months_no(df_mog_pct_4, months_no_4)
-
-                df_months_no_4 = st.data_editor(
-                    df_months_no_0_4,
-                    disabled=["MONTH_DATE"],
-                    key='df_months_no_4'
-                    )
-
-                a_fit_4, b_fit_4, df_avg_4 = fitting2(df_mog_pct_4, df_months_no_4)
-
-                st.metric('Amplitude', a_fit_4)
-                st.metric('Decay', b_fit_4)
-            with col2:
-                fit_plot(df_avg_4, a_fit_4, b_fit_4)
-                
-            with st.container():
-                new_mog_pct_avg_fit_4 = new_avg_fit(a_fit_4, b_fit_4, df_avg_4)
-                df_new_avg_fit_0_4 = series_to_df_transp(new_mog_pct_avg_fit_4, '% of M0')
-
-                st.write('Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_0_4)
-
-                value_4 = st.number_input('Adjust parameter intitial value:', min_value=0.0, value=1.0, key='value_4')
-                adjust_parameters_df_0_4 = adjust_params(value_4)
-                adjust_parameters_df_4 = st.data_editor(adjust_parameters_df_0_4, key='adjust_parameters_df_4')
-
-                df_new_avg_fit_4 = multiply_adjusted(df_new_avg_fit_0_4, adjust_parameters_df_4)
-                df_new_avg_fit_4b = df_new_avg_fit_4.copy()
-                df_new_avg_fit_4b.columns = df_new_avg_fit_4.columns.astype(int)
-                df_new_avg_fit_4b = df_new_avg_fit_4b.T
-
-                st.write('Adjusted Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_4)
-
-                plot_data_fitted(df_mog_pct_4, df_new_avg_fit_4b)
-
-
-        with st.expander('Mulipliers / Goals'):
-
-            
-
-            col1b, col2b = st.columns(2)
-
-            with col1b:
-                ROAS_goal_Y3_4 = st.number_input('ROAS Goal Y3', value=1.3, key='roas goal y3 4')
-            
-            with col2b:
-                multiplier_y3_4 = multi_3y(df_new_avg_fit_4b)
-                multiplier_d7_4, multiplier_4 = multiplier(df_d_0_4, months_no_4, df_mog_4, multiplier_y3_4)
-
-                st.metric('Multiplier Y3', multiplier_y3_4)
-                st.metric('Multiplier D7', multiplier_d7_4)
-                st.metric('Multiplier D7', multiplier_4)
-            
-            d7_growth_mean_4 = d7_growth(df_d_pivot_4, months_no_4)
-            d7_growth_mean_df_4 = series_to_df_transp(d7_growth_mean_4, 'D(n) to D7 Growth')
-            st.write('D(n) to D7 Growth')
-            st.dataframe(d7_growth_mean_df_4)
-
-            ROAS_goal_4, SKAD_ROAS_goal_net_4 = roas_goal(ROAS_goal_Y3_4, multiplier_4, d7_growth_mean_4)
-            
-            ROAS_goal_df_4 = series_to_df_transp(ROAS_goal_4, 'ROAS Goal')
-            st.write('ROAS Goal')
-            st.dataframe(ROAS_goal_df_4)
-
-            st.metric('SKAD ROAS Goal Net', SKAD_ROAS_goal_net_4)
-
+        tab_func(df, plat_4, us_ww_4, tab_no_4, traffic_4)
 
     with tab5:
         plat_5 = 'android'
         us_ww_5 = 'us'
         traffic_5 = 'Organic'
+        tab_no_5 = '5'
 
-        df_d_0_5 = df_category(df, plat_5, us_ww_5, traffic_5)
-        df_d_pivot_5 = df_category_pivot(df_d_0_5)
-
-        df_mog_0_5 = df_mog_0(df_d_0_5)
-        df_mog_5 = df_mog_pivot(df_mog_0_5)
-
-        df_mog_pct_5 = ratio_with_0(df_mog_5)
-
-        with st.expander('Net Revenue per DoG'):
-            st.dataframe(df_d_pivot_5)
-
-        with st.expander('Net Revenue per MoG'):
-            st.dataframe(df_mog_5)
-
-        with st.expander('% of M0 Net Revenue per MoG'):
-            st.dataframe(df_mog_pct_5)
-
-
-        with st.expander('Fitting'):
-            col1, col2 = st.columns(2)
-
-            with col1:
-                months_no_5 = st.number_input('No of recent months for fitting', value=9, key='months_no_5')
-
-                st.write('Adjust months to average')
-                df_months_no_0_5 = make_df_months_no(df_mog_pct_5, months_no_5)
-
-                df_months_no_5 = st.data_editor(
-                    df_months_no_0_5,
-                    disabled=["MONTH_DATE"],
-                    key='df_months_no_5'
-                    )
-
-                a_fit_5, b_fit_5, df_avg_5 = fitting2(df_mog_pct_5, df_months_no_5)
-
-                st.metric('Amplitude', a_fit_5)
-                st.metric('Decay', b_fit_5)
-            with col2:
-                fit_plot(df_avg_5, a_fit_5, b_fit_5)
-                
-            with st.container():
-                new_mog_pct_avg_fit_5 = new_avg_fit(a_fit_5, b_fit_5, df_avg_5)
-                df_new_avg_fit_0_5 = series_to_df_transp(new_mog_pct_avg_fit_5, '% of M0')
-
-                st.write('Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_0_5)
-
-                value_5 = st.number_input('Adjust parameter intitial value:', min_value=0.0, value=1.0, key='value_5')
-                adjust_parameters_df_0_5 = adjust_params(value_5)
-                adjust_parameters_df_5 = st.data_editor(adjust_parameters_df_0_5, key='adjust_parameters_df_5')
-
-                df_new_avg_fit_5 = multiply_adjusted(df_new_avg_fit_0_5, adjust_parameters_df_5)
-                df_new_avg_fit_5b = df_new_avg_fit_5.copy()
-                df_new_avg_fit_5b.columns = df_new_avg_fit_5.columns.astype(int)
-                df_new_avg_fit_5b = df_new_avg_fit_5b.T
-
-                st.write('Adjusted Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_5)
-
-                plot_data_fitted(df_mog_pct_5, df_new_avg_fit_5b)
-
-
-        with st.expander('Mulipliers / Goals'):
-
-            
-
-            col1b, col2b = st.columns(2)
-
-            with col1b:
-                ROAS_goal_Y3_5 = st.number_input('ROAS Goal Y3', value=1.3, key='roas goal y3 5')
-            
-            with col2b:
-                multiplier_y3_5 = multi_3y(df_new_avg_fit_5b)
-                multiplier_d7_5, multiplier_5 = multiplier(df_d_0_5, months_no_5, df_mog_5, multiplier_y3_5)
-
-                st.metric('Multiplier Y3', multiplier_y3_5)
-                st.metric('Multiplier D7', multiplier_d7_5)
-                st.metric('Multiplier D7', multiplier_5)
-            
-            d7_growth_mean_5 = d7_growth(df_d_pivot_5, months_no_5)
-            d7_growth_mean_df_5 = series_to_df_transp(d7_growth_mean_5, 'D(n) to D7 Growth')
-            st.write('D(n) to D7 Growth')
-            st.dataframe(d7_growth_mean_df_5)
-
-            ROAS_goal_5, SKAD_ROAS_goal_net_5 = roas_goal(ROAS_goal_Y3_5, multiplier_5, d7_growth_mean_5)
-            
-            ROAS_goal_df_5 = series_to_df_transp(ROAS_goal_5, 'ROAS Goal')
-            st.write('ROAS Goal')
-            st.dataframe(ROAS_goal_df_5)
-
-            st.metric('SKAD ROAS Goal Net', SKAD_ROAS_goal_net_5)
-
+        tab_func(df, plat_5, us_ww_5, tab_no_5, traffic_5)
 
     with tab6:
         plat_6 = 'android'
         us_ww_6 = 'us'
+        tab_no_6 = '6'
         traffic_6 = 'Paid'
 
-        df_d_0_6 = df_category(df, plat_6, us_ww_6, traffic_6)
-        df_d_pivot_6 = df_category_pivot(df_d_0_6)
-
-        df_mog_0_6 = df_mog_0(df_d_0_6)
-        df_mog_6 = df_mog_pivot(df_mog_0_6)
-
-        df_mog_pct_6 = ratio_with_0(df_mog_6)
-
-        with st.expander('Net Revenue per DoG'):
-            st.dataframe(df_d_pivot_6)
-
-        with st.expander('Net Revenue per MoG'):
-            st.dataframe(df_mog_6)
-
-        with st.expander('% of M0 Net Revenue per MoG'):
-            st.dataframe(df_mog_pct_6)
-
-
-        with st.expander('Fitting'):
-            col1, col2 = st.columns(2)
-
-            with col1:
-                months_no_6 = st.number_input('No of recent months for fitting', value=9, key='months_no_6')
-
-                st.write('Adjust months to average')
-                df_months_no_0_6 = make_df_months_no(df_mog_pct_6, months_no_6)
-
-                df_months_no_6 = st.data_editor(
-                    df_months_no_0_6,
-                    disabled=["MONTH_DATE"],
-                    key='df_months_no_6'
-                    )
-
-                a_fit_6, b_fit_6, df_avg_6 = fitting2(df_mog_pct_6, df_months_no_6)
-
-                st.metric('Amplitude', a_fit_6)
-                st.metric('Decay', b_fit_6)
-            with col2:
-                fit_plot(df_avg_6, a_fit_6, b_fit_6)
-                
-            with st.container():
-                new_mog_pct_avg_fit_6 = new_avg_fit(a_fit_6, b_fit_6, df_avg_6)
-                df_new_avg_fit_0_6 = series_to_df_transp(new_mog_pct_avg_fit_6, '% of M0')
-
-                st.write('Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_0_6)
-
-                value_6 = st.number_input('Adjust parameter intitial value:', min_value=0.0, value=1.0, key='value_6')
-                adjust_parameters_df_0_6 = adjust_params(value_6)
-                adjust_parameters_df_6 = st.data_editor(adjust_parameters_df_0_6, key='adjust_parameters_df_6')
-
-                df_new_avg_fit_6 = multiply_adjusted(df_new_avg_fit_0_6, adjust_parameters_df_6)
-                df_new_avg_fit_6b = df_new_avg_fit_6.copy()
-                df_new_avg_fit_6b.columns = df_new_avg_fit_6.columns.astype(int)
-                df_new_avg_fit_6b = df_new_avg_fit_6b.T
-
-                st.write('Adjusted Avg + Fitted % of Revenue')
-                st.dataframe(df_new_avg_fit_6)
-
-                plot_data_fitted(df_mog_pct_6, df_new_avg_fit_6b)
-
-
-        with st.expander('Mulipliers / Goals'):
-
-            
-
-            col1b, col2b = st.columns(2)
-
-            with col1b:
-                ROAS_goal_Y3_6 = st.number_input('ROAS Goal Y3', value=1.3, key='roas goal y3 6')
-            
-            with col2b:
-                multiplier_y3_6 = multi_3y(df_new_avg_fit_6b)
-                multiplier_d7_6, multiplier_6 = multiplier(df_d_0_6, months_no_6, df_mog_6, multiplier_y3_6)
-
-                st.metric('Multiplier Y3', multiplier_y3_6)
-                st.metric('Multiplier D7', multiplier_d7_6)
-                st.metric('Multiplier D7', multiplier_6)
-            
-            d7_growth_mean_6 = d7_growth(df_d_pivot_6, months_no_6)
-            d7_growth_mean_df_6 = series_to_df_transp(d7_growth_mean_6, 'D(n) to D7 Growth')
-            st.write('D(n) to D7 Growth')
-            st.dataframe(d7_growth_mean_df_6)
-
-            ROAS_goal_6, SKAD_ROAS_goal_net_6 = roas_goal(ROAS_goal_Y3_6, multiplier_6, d7_growth_mean_6)
-            
-            ROAS_goal_df_6 = series_to_df_transp(ROAS_goal_6, 'ROAS Goal')
-            st.write('ROAS Goal')
-            st.dataframe(ROAS_goal_df_6)
-
-            st.metric('SKAD ROAS Goal Net', SKAD_ROAS_goal_net_6)
-
+        tab_func(df, plat_6, us_ww_6, tab_no_6, traffic_6)
+    
