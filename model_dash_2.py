@@ -121,7 +121,7 @@ def fitting2(df, df_months_no):
 def fit_plot(df_avg, a_fit, b_fit):
     fig, ax = plt.subplots()
     ax.scatter(df_avg.index, df_avg, label='Data')
-    ax.plot(df_avg.index, exponential_decay(df_avg.index, a_fit, b_fit), 'r-', label='Fitted curve')
+    ax.plot(df_avg.index, exponential_decay(df_avg.index.astype(float), a_fit, b_fit), 'r-', label='Fitted curve')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
     ax.legend()
